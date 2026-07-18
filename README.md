@@ -1,32 +1,28 @@
 # You Can't `assert` an LLM: How to Actually Test Non-Deterministic AI
 
-> **AI Engineer Roadmap — Project 6.2 ("Teach it back")**
-> A plain-language explainer on building evaluation harnesses for LLM systems —
-> the single most underrated skill in AI engineering. Runnable example included:
-> [`example.py`](example.py).
+A plain-language explainer, with a runnable ~60-line example, on building evaluation harnesses for LLM systems — the single most underrated skill in AI engineering.
 
-If you've built anything on top of an LLM, you've felt this: you tweak a prompt,
-the demo looks better, you ship it — and three other things quietly break. You
-have no idea, because you have no way to *know*. This article is about closing
-that gap.
+![Python](https://img.shields.io/badge/python-3.8%2B-blue)
+![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)
+![License](https://img.shields.io/badge/license-MIT-lightgrey)
+
+> **AI Engineer Roadmap — Project 6.2 ("Teach it back")**
 
 ---
 
-## The problem in one line
+## What it does
 
-**Traditional software is tested with `assert output == expected`. LLM output
-isn't equal to anything.**
+This repo is a short article plus one runnable file. The article argues that
+`assert output == expected` is useless for LLM output and walks through the fix:
+an **evaluation harness** — a labelled test set, automated scoring, and a
+regression gate you run on every change. [`example.py`](example.py) implements
+all four pieces in ~60 dependency-free lines so you can see a regression get
+caught end to end.
 
-Ask the same model the same question twice and you get two different sentences
-that mean the same thing. Ask it after a prompt change and you might get a better
-answer, a worse one, or the same quality phrased differently. `==` is useless
-here, so most people fall back to the worst possible test: **reading a few
-outputs and going "yeah, seems fine."**
-
-That's not a test. It doesn't scale past five examples, it doesn't catch
-regressions, and it can't tell you whether the change you just made helped or
-hurt. The fix is an **evaluation harness**: a labelled test set, automated
-scoring, and a regression gate you can run on every change.
+If you've built anything on top of an LLM, you've felt this: you tweak a
+prompt, the demo looks better, you ship it — and three other things quietly
+break. You have no idea, because you have no way to *know*. That's the gap
+this explainer closes.
 
 ---
 
@@ -90,24 +86,12 @@ contain the right keyword.
 
 This is the payoff. Store the scores from your current system as a **baseline**.
 After any change — new prompt, new model, refactored retrieval — run the eval
-again and **diff the two runs case by case**:
-
-- which cases got **worse** (regressed)?
-- which got **better** (improved)?
-- what's the overall delta?
+again and **diff the two runs case by case**: which cases got worse, which got
+better, what's the overall delta.
 
 Wire that into CI: if any case regressed, fail the build. Now a prompt change goes
 from "I think it's fine" to **"recall dropped on 2 of 20 cases, here they are"** —
 in seconds, automatically, before it reaches users.
-
-```
-v1: mean_score=1.000
-v2: mean_score=0.775   (after a 'harmless' refactor)
-REGRESSED: capital_jp 1.00 -> 0.10,  planets 1.00 -> 0.10
-```
-
-That output is the entire point. You changed something, and you *immediately know*
-exactly what it broke.
 
 ---
 
@@ -124,8 +108,6 @@ Being able to say *"here is where this system fails, here's the number, and here
 the test that will catch it if it regresses"* is the difference between someone
 who builds demos and someone companies pay.
 
----
-
 ## The mental model that makes it click
 
 Think of your LLM system as a function whose output you can't predict, only
@@ -139,23 +121,103 @@ LLM harness:          assert judge(f(x), criteria) >= threshold,  on a labelled 
 
 Same discipline as a normal test suite — labelled inputs, automated checks, a
 gate on every change. You've just moved the assertion from the *output* to a
-*scored judgement of the output*. Once that clicks, testing LLMs stops feeling
-impossible and starts feeling like... testing.
+*scored judgement of the output*.
 
 ---
 
-## Try it
+## Architecture
 
-[`example.py`](example.py) is a ~60-line, dependency-free harness implementing all
-four pieces with a stubbed judge, so you can see a regression get caught:
+`example.py` implements the four pieces above as a single, linear pipeline —
+two toy systems (`system_v1`, `system_v2`, where v2 has an introduced bug) are
+each run over the same labelled cases, scored, and diffed:
+
+```mermaid
+flowchart LR
+    A["Labelled test cases<br/>(CASES)"] --> B["system_v1<br/>(baseline)"]
+    A --> C["system_v2<br/>(candidate, has a bug)"]
+    B --> D["judge()<br/>LLM-as-judge, stubbed"]
+    C --> D
+    D --> E["run_eval()<br/>per-case scores + mean"]
+    E -->|baseline scores| F["compare()<br/>regression gate"]
+    E -->|candidate scores| F
+    F --> G{"Any case<br/>regressed?"}
+    G -->|yes| H["print diff, exit 1<br/>(CI would fail here)"]
+    G -->|no| I["exit 0<br/>safe to ship"]
+```
+
+`judge()` is stubbed as a deterministic substring match so the whole thing runs
+offline and instantly — a real judge would call an LLM with a rubric and parse
+a `{"score": ...}` response instead.
+
+## Quickstart
+
+No install step — the example is pure standard library.
 
 ```bash
+git clone https://github.com/smafnan/teaching-eval-harnesses.git
+cd teaching-eval-harnesses
 python example.py
 ```
 
-A fuller, tested implementation — heuristic scorers, a real LLM-as-judge with
-pluggable providers, and a CI-ready regression gate — is in the companion project:
-**[ai-roadmap-4.3-eval-harness](https://github.com/smafnan/ai-roadmap-4.3-eval-harness)**.
+Actual output of the command above:
+
+```
+v1 mean score: 1.000
+v2 mean score: 0.667
+
+REGRESSION DETECTED in: japan
+  japan: 1.00 -> 0.00
+
+(A CI gate would fail the build here.)
+```
+
+The process exits with status `1` when a regression is found, so this pattern
+drops straight into a CI job as a pass/fail gate.
+
+## Project structure
+
+```
+.
+├── example.py    # ~60-line runnable harness: test set, scorer, aggregate, regression gate
+├── README.md     # this explainer
+├── LICENSE       # MIT
+└── .gitignore
+```
+
+## Key design decisions
+
+- **Stubbed judge, real structure.** `judge()` is a one-line substring check
+  instead of a real LLM call, so the demo is deterministic, free, and runs in
+  CI with zero network access — while still exercising the exact same
+  aggregate-and-gate logic a real judge would plug into.
+- **Two toy "systems," one seeded bug.** `system_v1`/`system_v2` stand in for
+  "your app before/after a change." `system_v2`'s Japan/Kyoto mistake is
+  planted specifically so `compare()` has something real to catch.
+- **Dependency-free on purpose.** The whole point of the explainer is the
+  *mental model* (test set → scorer → aggregate → gate), not a framework. Zero
+  imports keeps the example copy-pasteable into any codebase.
+
+## Limitations
+
+- `judge()` is illustrative, not production-grade — it's a substring match,
+  not a rubric-scored LLM call, and doesn't return reasoning the way a real
+  judge would.
+- `compare()` assumes `baseline` and `candidate` share the exact same case IDs;
+  it will raise `KeyError` if a case is missing from `candidate`, rather than
+  handling that case defensively.
+- Only three toy cases — enough to demonstrate the pattern, not enough to
+  represent a real test set (the article itself recommends ~20+ cases covering
+  real failure modes).
+- No automated test suite or CI workflow in this repo; `example.py` is a
+  teaching artifact, verified by manual/reproducible run, not by a pytest suite.
+
+## Roadmap
+
+- A fuller, tested implementation — heuristic scorers, a real LLM-as-judge with
+  pluggable providers, and a CI-ready regression gate — lives in the companion
+  project: **[ai-roadmap-4.3-eval-harness](https://github.com/smafnan/ai-roadmap-4.3-eval-harness)**.
+- Possible follow-up: a small pytest suite around `run_eval`/`compare` in this
+  repo, and a GitHub Actions workflow that runs `example.py` as a smoke test.
 
 ---
 
