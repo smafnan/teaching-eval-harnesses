@@ -41,9 +41,16 @@ def run_eval(system) -> tuple[dict[str, float], float]:
     return scores, mean
 
 
-# 4) REGRESSION GATE: diff two runs case-by-case.
-def compare(baseline: dict[str, float], candidate: dict[str, float]) -> list[str]:
-    return [cid for cid in baseline if candidate[cid] < baseline[cid]]
+# 4) REGRESSION GATE: diff two runs case-by-case. Tolerates mismatched case
+#    IDs (e.g. a case renamed or dropped between runs) instead of raising
+#    KeyError — missing/extra cases are reported, not silently skipped.
+def compare(baseline: dict[str, float], candidate: dict[str, float]) -> dict[str, list[str]]:
+    shared = baseline.keys() & candidate.keys()
+    return {
+        "regressed": [cid for cid in shared if candidate[cid] < baseline[cid]],
+        "missing": sorted(baseline.keys() - candidate.keys()),
+        "extra": sorted(candidate.keys() - baseline.keys()),
+    }
 
 
 if __name__ == "__main__":
@@ -53,7 +60,13 @@ if __name__ == "__main__":
     print(f"v1 mean score: {base_mean:.3f}")
     print(f"v2 mean score: {cand_mean:.3f}")
 
-    regressed = compare(base_scores, cand_scores)
+    diff = compare(base_scores, cand_scores)
+    if diff["missing"]:
+        print(f"\nWARNING: missing from candidate: {', '.join(diff['missing'])}")
+    if diff["extra"]:
+        print(f"\nWARNING: extra in candidate (no baseline): {', '.join(diff['extra'])}")
+
+    regressed = diff["regressed"]
     if regressed:
         print(f"\nREGRESSION DETECTED in: {', '.join(regressed)}")
         for cid in regressed:

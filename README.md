@@ -178,9 +178,12 @@ drops straight into a CI job as a pass/fail gate.
 
 ```
 .
-├── example.py    # ~60-line runnable harness: test set, scorer, aggregate, regression gate
-├── README.md     # this explainer
-├── LICENSE       # MIT
+├── example.py           # ~60-line runnable harness: test set, scorer, aggregate, regression gate
+├── tests/
+│   └── test_example.py  # pytest suite for run_eval() and the compare() regression gate
+├── conftest.py           # makes example.py importable from tests/
+├── README.md             # this explainer
+├── LICENSE               # MIT
 └── .gitignore
 ```
 
@@ -202,22 +205,27 @@ drops straight into a CI job as a pass/fail gate.
 - `judge()` is illustrative, not production-grade — it's a substring match,
   not a rubric-scored LLM call, and doesn't return reasoning the way a real
   judge would.
-- `compare()` assumes `baseline` and `candidate` share the exact same case IDs;
-  it will raise `KeyError` if a case is missing from `candidate`, rather than
-  handling that case defensively.
 - Only three toy cases — enough to demonstrate the pattern, not enough to
   represent a real test set (the article itself recommends ~20+ cases covering
   real failure modes).
-- No automated test suite or CI workflow in this repo; `example.py` is a
-  teaching artifact, verified by manual/reproducible run, not by a pytest suite.
+
+## Testing
+
+A small, stdlib-only pytest suite in [`tests/`](tests/test_example.py) covers
+`run_eval`, the happy-path `compare()` regression gate, and the mismatched-ID
+edge case (missing/extra cases are reported instead of raising `KeyError`).
+Run it with:
+
+```bash
+pip install pytest
+pytest -q
+```
 
 ## Roadmap
 
 - A fuller, tested implementation — heuristic scorers, a real LLM-as-judge with
   pluggable providers, and a CI-ready regression gate — lives in the companion
   project: **[ai-roadmap-4.3-eval-harness](https://github.com/smafnan/ai-roadmap-4.3-eval-harness)**.
-- Possible follow-up: a small pytest suite around `run_eval`/`compare` in this
-  repo, and a GitHub Actions workflow that runs `example.py` as a smoke test.
 
 ---
 
